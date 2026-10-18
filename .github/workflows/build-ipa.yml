@@ -1,0 +1,67 @@
+name: Build Xiaomi Remote IPA
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - "Sources/**"
+      - "Tests/**"
+      - "project.yml"
+      - ".github/workflows/build-ipa.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  build-ipa:
+    runs-on: macos-15
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Select Xcode
+        run: |
+          xcodebuild -version
+          xcode-select -p
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Generate Xcode project
+        run: xcodegen generate --spec project.yml
+
+      - name: Build unsigned iOS app
+        run: |
+          set -o pipefail
+          xcodebuild \
+            -project XiaomiRemote.xcodeproj \
+            -scheme XiaomiRemote \
+            -configuration Release \
+            -sdk iphoneos \
+            -destination 'generic/platform=iOS' \
+            -derivedDataPath build \
+            CODE_SIGNING_ALLOWED=NO \
+            build
+
+      - name: Package IPA for SideStore
+        run: |
+          set -euo pipefail
+          APP_PATH="build/Build/Products/Release-iphoneos/XiaomiRemote.app"
+          test -d "$APP_PATH" || { echo "Build app not found at $APP_PATH"; exit 1; }
+          mkdir -p ipa/Payload
+          cp -R "$APP_PATH" ipa/Payload/
+          (cd ipa && /usr/bin/zip -qry ../XiaomiRemote-unsigned.ipa Payload)
+          test -s XiaomiRemote-unsigned.ipa
+          ls -lh XiaomiRemote-unsigned.ipa
+
+      - name: Upload IPA artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: XiaomiRemote-IPA
+          path: XiaomiRemote-unsigned.ipa
+          if-no-files-found: error
+          retention-days: 14
